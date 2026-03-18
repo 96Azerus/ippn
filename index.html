@@ -17,10 +17,14 @@
         .score { font-size: 3.5rem; font-weight: bold; text-align: center; margin: 10px 0; }
         .pos { color: var(--pos); text-shadow: 0 0 15px rgba(16,185,129,0.3); } 
         .neg { color: var(--neg); text-shadow: 0 0 15px rgba(239,68,68,0.3); }
-        .history-list { max-height: 400px; overflow-y: auto; margin-top: 15px; }
-        .history-item { display: flex; justify-content: space-between; padding: 12px; border-bottom: 1px solid #334155; align-items: center; }
+        .history-list { max-height: 600px; overflow-y: auto; margin-top: 15px; }
+        .history-item { display: flex; justify-content: space-between; padding: 15px; border-bottom: 1px solid #334155; align-items: center; cursor: pointer; transition: background 0.2s;}
         .history-item:hover { background: #334155; }
         .utc-info { text-align: center; color: #94a3b8; font-size: 0.9rem; margin-bottom: 10px; }
+        .search-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        .search-controls > * { flex: 1; min-width: 150px; }
+        .peak-badge { background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; margin-left: 8px; }
+        @media (max-width: 600px) { .search-controls > * { min-width: 100%; } }
     </style>
 </head>
 <body>
@@ -30,7 +34,7 @@
         <div class="panel">
             <h2>Расчет на точное время</h2>
             <label style="font-size: 0.9rem; color: #94a3b8;">Ваше местное время:</label>
-            <input type="datetime-local" id="dateTimePicker">
+            <input type="datetime-local" id="dateTimePicker" step="60">
             <button onclick="calcEnergy()">Рассчитать</button>
             <div id="utcDisplay" class="utc-info">Конвертация в UTC...</div>
             <div id="scoreDisplay" class="score pos">0</div>
@@ -44,18 +48,18 @@
 
         <!-- Поиск аномалий -->
         <div class="panel" style="flex: 100%;">
-            <h2>Снайперский поиск аномалий (Точность до минуты UTC)</h2>
-            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <input type="number" id="startYear" placeholder="Год от" value="2020" style="flex: 1;">
-                <input type="number" id="endYear" placeholder="Год до" value="2030" style="flex: 1;">
+            <h2>Снайперский поиск (Окна активности + Точный пик)</h2>
+            <div class="search-controls">
+                <input type="number" id="startYear" placeholder="Год от" value="2020">
+                <input type="number" id="endYear" placeholder="Год до" value="2030">
                 <select id="condition" style="flex: 2;">
                     <option value="less">Энергия НИЖЕ чем (Деструкция)</option>
                     <option value="greater">Энергия ВЫШЕ чем (Конструкция)</option>
                 </select>
-                <input type="number" id="threshold" placeholder="Порог" value="-1000000" style="flex: 1;">
-                <button onclick="searchHistory()" style="flex: 1;">Найти пики</button>
+                <input type="number" id="threshold" placeholder="Порог" value="-1000000">
+                <button onclick="searchHistory()">Найти аномалии</button>
             </div>
-            <div id="loading" style="display:none; text-align:center; margin-top:15px; color: #94a3b8;">Анализ орбит и поиск точных минут...</div>
+            <div id="loading" style="display:none; text-align:center; margin-top:15px; color: #94a3b8; font-weight: bold;">Анализ орбит и поиск точных минут...</div>
             <div class="history-list" id="historyList"></div>
         </div>
     </div>
@@ -63,7 +67,6 @@
     <script>
         let chartObj = null;
 
-        // Устанавливаем текущее местное время при загрузке
         window.addEventListener('DOMContentLoaded', () => {
             const now = new Date();
             now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -75,71 +78,120 @@
             const localTimeStr = document.getElementById('dateTimePicker').value;
             if (!localTimeStr) return;
 
-            // Конвертируем местное время в UTC
             const localDate = new Date(localTimeStr);
-            const utcIsoString = localDate.toISOString(); // Формат: 2026-03-23T12:00:00.000Z
+            const utcIsoString = localDate.toISOString(); 
 
-            // 1. Запрос точной энергии на выбранную минуту
-            const res = await fetch(`/api/energy?utc_timestamp=${encodeURIComponent(utcIsoString)}`);
-            const data = await res.json();
-            
-            document.getElementById('utcDisplay').innerText = `Астрономическое время: ${data.utc_time}`;
-            const scoreEl = document.getElementById('scoreDisplay');
-            scoreEl.innerText = (data.score > 0 ? '+' : '') + Math.round(data.score).toLocaleString('ru-RU');
-            scoreEl.className = 'score ' + (data.score >= 0 ? 'pos' : 'neg');
+            try {
+                // 1. Запрос точной энергии
+                const res = await fetch(`/api/energy?utc_timestamp=${encodeURIComponent(utcIsoString)}`);
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || "Ошибка сервера");
+                }
+                const data = await res.json();
+                
+                document.getElementById('utcDisplay').innerText = `Астрономическое время: ${data.utc_time}`;
+                const scoreEl = document.getElementById('scoreDisplay');
+                scoreEl.innerText = (data.score > 0 ? '+' : '') + Math.round(data.score).toLocaleString('ru-RU');
+                scoreEl.className = 'score ' + (data.score >= 0 ? 'pos' : 'neg');
 
-            // 2. Пакетный запрос для графика (быстро!)
-            const baseDateStr = utcIsoString.split('T')[0];
-            const batchRes = await fetch(`/api/energy_batch?base_date=${baseDateStr}&days_range=15`);
-            const batchData = await batchRes.json();
+                // 2. Пакетный запрос для графика
+                const baseDateStr = utcIsoString.split('T')[0];
+                const batchRes = await fetch(`/api/energy_batch?base_date=${baseDateStr}&days_range=15`);
+                if (!batchRes.ok) throw new Error("Ошибка загрузки графика");
+                const batchData = await batchRes.json();
 
-            const labels = batchData.map(item => item.date);
-            const chartData = batchData.map(item => item.score);
+                const labels = batchData.map(item => item.date);
+                const chartData = batchData.map(item => item.score);
+                const bgColors = chartData.map(v => v >= 0 ? '#10b981' : '#ef4444');
 
-            if(chartObj) chartObj.destroy();
-            const ctx = document.getElementById('chart').getContext('2d');
-            chartObj = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets:[{
-                        label: 'Пси-энергия',
-                        data: chartData,
-                        backgroundColor: chartData.map(v => v >= 0 ? '#10b981' : '#ef4444'),
-                        borderRadius: 4
-                    }]
-                },
-                options: { responsive: true, maintainAspectRatio: false }
-            });
+                const ctx = document.getElementById('chart').getContext('2d');
+                if (!chartObj) {
+                    chartObj = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: labels,
+                            datasets:[{
+                                label: 'Пси-энергия',
+                                data: chartData,
+                                backgroundColor: bgColors,
+                                borderRadius: 4
+                            }]
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
+                    });
+                } else {
+                    chartObj.data.labels = labels;
+                    chartObj.data.datasets[0].data = chartData;
+                    chartObj.data.datasets[0].backgroundColor = bgColors;
+                    chartObj.update(); // Плавное обновление без мерцания
+                }
+            } catch (err) {
+                document.getElementById('utcDisplay').innerText = err.message;
+            }
         }
 
         async function searchHistory() {
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('historyList').innerHTML = '';
+            const loadingEl = document.getElementById('loading');
+            const list = document.getElementById('historyList');
+            
+            loadingEl.style.display = 'block';
+            loadingEl.style.color = '#94a3b8';
+            loadingEl.innerText = 'Анализ орбит и поиск точных минут...';
+            list.innerHTML = '';
             
             const start = document.getElementById('startYear').value;
             const end = document.getElementById('endYear').value;
             const cond = document.getElementById('condition').value;
             const thresh = document.getElementById('threshold').value;
 
-            const res = await fetch(`/api/history?start_year=${start}&end_year=${end}&condition=${cond}&threshold=${thresh}`);
-            const data = await res.json();
-            
-            document.getElementById('loading').style.display = 'none';
-            const list = document.getElementById('historyList');
-            
-            data.results.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'history-item';
-                const color = item.score >= 0 ? 'pos' : 'neg';
-                const sign = item.score > 0 ? '+' : '';
+            try {
+                const res = await fetch(`/api/history?start_year=${start}&end_year=${end}&condition=${cond}&threshold=${thresh}`);
                 
-                div.innerHTML = `
-                    <span style="font-size: 1.2rem; font-weight: bold;">${item.time_utc}</span>
-                    <span class="${color}" style="font-size: 1.5rem; font-weight: bold;">${sign}${Math.round(item.score).toLocaleString('ru-RU')}</span>
-                `;
-                list.appendChild(div);
-            });
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.detail || "Ошибка поиска");
+                }
+                
+                const data = await res.json();
+                loadingEl.style.display = 'none';
+                
+                if (data.results.length === 0) {
+                    list.innerHTML = '<div style="text-align:center; color:#94a3b8; padding: 20px;">Ничего не найдено</div>';
+                    return;
+                }
+
+                data.results.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'history-item';
+                    const color = item.score >= 0 ? 'pos' : 'neg';
+                    const sign = item.score > 0 ? '+' : '';
+                    
+                    div.innerHTML = `
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <span style="font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Окно активности:</span>
+                            <span style="font-size: 1rem; color: #cbd5e1;">Начало: ${item.start_utc}</span>
+                            <span style="font-size: 1.1rem; font-weight: bold; color: #e2e8f0;">ПИК: ${item.peak_utc} <span class="peak-badge">MAX</span></span>
+                            <span style="font-size: 1rem; color: #cbd5e1;">Конец: ${item.end_utc}</span>
+                        </div>
+                        <span class="${color}" style="font-size: 1.6rem; font-weight: bold;">${sign}${Math.round(item.score).toLocaleString('ru-RU')}</span>
+                    `;
+                    
+                    // Клик по результату переносит время пика в основной калькулятор
+                    div.onclick = () => {
+                        const isoLocal = new Date(item.peak_utc.replace(' UTC', 'Z').replace(' ', 'T'));
+                        isoLocal.setMinutes(isoLocal.getMinutes() - isoLocal.getTimezoneOffset());
+                        document.getElementById('dateTimePicker').value = isoLocal.toISOString().slice(0,16);
+                        calcEnergy();
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    };
+                    
+                    list.appendChild(div);
+                });
+            } catch (err) {
+                loadingEl.innerText = err.message;
+                loadingEl.style.color = '#ef4444'; // Красный цвет для ошибки
+            }
         }
     </script>
 </body>
