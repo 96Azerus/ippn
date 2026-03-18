@@ -1,0 +1,171 @@
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+import swisseph as swe
+import datetime
+
+app = FastAPI()
+app.add_middleware(CORSMiddleware, allow_origins=["*"])
+
+# Планеты (pyswisseph константы)
+SUN, MOON, MERCURY, VENUS, MARS, JUPITER, SATURN, URANUS, NEPTUNE = 0, 1, 2, 3, 4, 5, 6, 7, 8
+PLANETS = [SUN, MOON, MERCURY, VENUS, MARS, JUPITER, SATURN, URANUS, NEPTUNE]
+
+# ТОЧНЫЕ ОРБИСЫ ИППН (стр. 186 / PDF стр. 38)
+ASPECTS = {
+    0: 5.0,   # Соединение (±5°)
+    30: 1.0,  # Семисекстиль (±1°)
+    45: 1.0,  # Семиквинтиль (±1°)
+    60: 3.0,  # Секстиль (±3°)
+    90: 3.0,  # Квадратура (±3°)
+    120: 3.0, # Тригон (±3°)
+    135: 1.0, # Сесквиквадрат (±1°)
+    150: 1.0, # Квинкункс (±1°)
+    180: 3.0  # Оппозиция (±3°)
+}
+
+# ПОЛНАЯ ОЦИФРОВКА ТАБЛИЦЫ 1 (стр. 44)
+TABLE_1 = {
+    (SUN, MERCURY): {0: 21200},
+    (SUN, VENUS): {0: 77000},
+    (SUN, MOON): {0: 3870000, 30: 44, 45: -44, 60: 1968, 90: -1968, 120: 1968, 135: -44, 150: -44, 180: -3870000},
+    (SUN, MARS): {0: 21200, 30: 12, 45: -12, 60: 145, 90: -145, 120: 145, 135: -12, 150: -12, 180: -21200},
+    (SUN, JUPITER): {0: 300000, 30: 24, 45: -24, 60: 548, 90: -548, 120: 548, 135: -24, 150: -24, 180: -300000},
+    (SUN, SATURN): {0: 95000, 30: 18, 45: -18, 60: 308, 90: -308, 120: 308, 135: -18, 150: -18, 180: -95000},
+    (SUN, URANUS): {0: 17000, 30: 11, 45: -11, 60: 130, 90: -130, 120: 130, 135: -11, 150: -11, 180: -17000},
+    (SUN, NEPTUNE): {0: 12000, 30: 10, 45: -10, 60: 110, 90: -110, 120: 110, 135: -10, 150: -10, 180: -12000},
+    (MERCURY, VENUS): {0: 33, 30: 2, 45: -2, 60: 6},
+    (MOON, MERCURY): {0: 1643, 30: 6, 45: -6, 60: 41, 90: -41, 120: 41, 135: -6, 150: -6, 180: -1643},
+    (MERCURY, MARS): {0: 9, 30: 2, 45: -2, 60: 3, 90: -3, 120: 3, 135: -2, 150: -2, 180: -9},
+    (MERCURY, JUPITER): {0: 127, 30: 3, 45: -3, 60: 12, 90: -12, 120: 12, 135: -3, 150: -3, 180: -127},
+    (MERCURY, SATURN): {0: 40, 30: 3, 45: -3, 60: 6, 90: -6, 120: 6, 135: -3, 150: -3, 180: -40},
+    (MERCURY, URANUS): {0: 7, 30: 2, 45: -2, 60: 3, 90: -3, 120: 3, 135: -2, 150: -2, 180: -7},
+    (MERCURY, NEPTUNE): {0: 5, 30: 1, 45: -1, 60: 2, 90: -2, 120: 2, 135: -1, 150: -1, 180: -5},
+    (MOON, VENUS): {0: 6000, 30: 9, 45: -9, 60: 77, 90: -77, 120: 77, 135: -9, 150: -9, 180: -6000},
+    (VENUS, MARS): {0: 33, 30: 2, 45: -2, 60: 8, 90: -8, 120: 8, 135: -2, 150: -2, 180: -33},
+    (VENUS, JUPITER): {0: 465, 30: 5, 45: -5, 60: 22, 90: -22, 120: 22, 135: -5, 150: -5, 180: -465},
+    (VENUS, SATURN): {0: 147, 30: 4, 45: -4, 60: 12, 90: -12, 120: 12, 135: -4, 150: -4, 180: -147},
+    (VENUS, URANUS): {0: 27, 30: 3, 45: -3, 60: 5, 90: -5, 120: 5, 135: -3, 150: -3, 180: -27},
+    (VENUS, NEPTUNE): {0: 19, 30: 2, 45: -2, 60: 4, 90: -4, 120: 4, 135: -2, 150: -2, 180: -19},
+    (MOON, MARS): {0: 1643, 30: 6, 45: -6, 60: 41, 90: -41, 120: 41, 135: -6, 150: -6, 180: -1643},
+    (MOON, JUPITER): {0: 23230, 30: 12, 45: -12, 60: 152, 90: -152, 120: 152, 135: -12, 150: -12, 180: -23230},
+    (MOON, SATURN): {0: 7348, 30: 9, 45: -9, 60: 86, 90: -86, 120: 86, 135: -9, 150: -9, 180: -7348},
+    (MOON, URANUS): {0: 1342, 30: 6, 45: -6, 60: 37, 90: -37, 120: 37, 135: -6, 150: -6, 180: -1342},
+    (MOON, NEPTUNE): {0: 949, 30: 5, 45: -5, 60: 31, 90: -31, 120: 31, 135: -5, 150: -5, 180: -949},
+    (MARS, JUPITER): {0: 127, 30: 3, 45: -3, 60: 11, 90: -11, 120: 11, 135: -3, 150: -3, 180: -127},
+    (MARS, SATURN): {0: 40, 30: 3, 45: -3, 60: 6, 90: -6, 120: 6, 135: -3, 150: -3, 180: -40},
+    (MARS, URANUS): {0: 7, 30: 2, 45: -2, 60: 3, 90: -3, 120: 3, 135: -2, 150: -2, 180: -7},
+    (MARS, NEPTUNE): {0: 3, 30: 1, 45: -1, 60: 2, 90: -2, 120: 2, 135: -1, 150: -1, 180: -3},
+    (JUPITER, SATURN): {0: 569, 30: 5, 45: -5, 60: 24, 90: -24, 120: 24, 135: -5, 150: -5, 180: -569},
+    (JUPITER, URANUS): {0: 104, 30: 4, 45: -4, 60: 10, 90: -10, 120: 10, 135: -4, 150: -4, 180: -104},
+    (JUPITER, NEPTUNE): {0: 74, 30: 3, 45: -3, 60: 9, 90: -9, 120: 9, 135: -3, 150: -3, 180: -74},
+    (SATURN, URANUS): {0: 33, 30: 2, 45: -2, 60: 6, 90: -6, 120: 6, 135: -2, 150: -2, 180: -33},
+    (SATURN, NEPTUNE): {0: 23, 30: 2, 45: -2, 60: 5, 90: -5, 120: 5, 135: -2, 150: -2, 180: -23},
+    (URANUS, NEPTUNE): {0: 4, 30: 1, 45: -1, 60: 2, 90: -2, 120: 2, 135: -1, 150: -1, 180: -4}
+}
+
+def get_energy_for_jd(jd):
+    positions = {}
+    for p in PLANETS:
+        pos, _ = swe.calc_ut(jd, p)
+        positions[p] = pos[0]
+        
+    total_energy = 0
+    for i in range(len(PLANETS)):
+        for j in range(i + 1, len(PLANETS)):
+            p1, p2 = PLANETS[i], PLANETS[j]
+            pair = tuple(sorted([p1, p2]))
+            
+            if pair not in TABLE_1:
+                continue
+                
+            diff = abs(positions[p1] - positions[p2])
+            if diff > 180: diff = 360 - diff
+                
+            for aspect, orb in ASPECTS.items():
+                if aspect in TABLE_1[pair]:
+                    deviation = abs(diff - aspect)
+                    if deviation <= orb:
+                        # ИНТЕРПОЛЯЦИЯ ИППН: Линейное снижение силы от 100% в центре до 0% на краю орбиса
+                        power = 1.0 - (deviation / orb)
+                        base_val = TABLE_1[pair][aspect]
+                        total_energy += base_val * power
+    return int(total_energy)
+
+def find_exact_peak(base_jd, condition):
+    best_jd = base_jd
+    best_score = get_energy_for_jd(base_jd)
+    
+    # Сканируем 24 часа
+    for hour in range(24):
+        jd = base_jd + (hour / 24.0)
+        score = get_energy_for_jd(jd)
+        if (condition == "greater" and score > best_score) or (condition == "less" and score < best_score):
+            best_score = score
+            best_jd = jd
+            
+    # Сканируем 60 минут внутри найденного часа
+    peak_jd = best_jd
+    peak_score = best_score
+    for minute in range(60):
+        jd = best_jd + (minute / 1440.0)
+        score = get_energy_for_jd(jd)
+        if (condition == "greater" and score > peak_score) or (condition == "less" and score < peak_score):
+            peak_score = score
+            peak_jd = jd
+            
+    y, m, d, h = swe.revjul(peak_jd)
+    minute = int((h - int(h)) * 60)
+    dt_str = f"{y}-{m:02d}-{d:02d} {int(h):02d}:{minute:02d} UTC"
+    return dt_str, peak_score
+
+@app.get("/api/energy")
+def get_energy(utc_timestamp: str):
+    # Принимаем точное время UTC в формате ISO (например: 2026-03-23T12:00:00Z)
+    dt = datetime.datetime.fromisoformat(utc_timestamp.replace('Z', '+00:00'))
+    jd = swe.julday(dt.year, dt.month, dt.day, dt.hour + dt.minute/60.0)
+    score = get_energy_for_jd(jd)
+    return {"utc_time": dt.strftime("%Y-%m-%d %H:%M UTC"), "score": score}
+
+@app.get("/api/energy_batch")
+def get_energy_batch(base_date: str, days_range: int = 15):
+    # Пакетный запрос для графика (считает весь месяц за 1 раз)
+    y, m, d = map(int, base_date.split("-"))
+    base_jd = swe.julday(y, m, d, 12.0) # Считаем на полдень UTC для графика
+    
+    results = []
+    for i in range(-days_range, days_range + 1):
+        jd = base_jd + i
+        score = get_energy_for_jd(jd)
+        
+        # Конвертируем JD обратно в дату для подписи
+        ry, rm, rd, _ = swe.revjul(jd)
+        date_str = f"{rd:02d}.{rm:02d}"
+        results.append({"date": date_str, "score": score})
+        
+    return results
+
+@app.get("/api/history")
+def search_history(start_year: int, end_year: int, threshold: int, condition: str):
+    results = []
+    jd_start = swe.julday(start_year, 1, 1, 0.0)
+    jd_end = swe.julday(end_year, 12, 31, 0.0)
+    
+    current_jd = jd_start
+    while current_jd <= jd_end:
+        score = get_energy_for_jd(current_jd)
+        
+        if (condition == "greater" and score >= threshold) or (condition == "less" and score <= threshold):
+            exact_time, exact_score = find_exact_peak(current_jd, condition)
+            results.append({"time_utc": exact_time, "score": exact_score})
+            current_jd += 3 # Пропускаем пару дней, чтобы не дублировать один и тот же пик
+        else:
+            current_jd += 1
+            
+    results.sort(key=lambda x: abs(x["score"]), reverse=True)
+    return {"results": results[:30]}
+
+@app.get("/")
+def read_root():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
