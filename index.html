@@ -159,10 +159,16 @@
             const hourlyData = await res.json();
 
             const labels = hourlyData.map(item => item.label);
-            const chartData = hourlyData.map(item => [item.min, item.max]);
+            
+            // ИСПРАВЛЕНО: Делаем столбцы сплошными от 0 до максимального по модулю значения за час
+            const chartData = hourlyData.map(item => {
+                const val = Math.abs(item.max) >= Math.abs(item.min) ? item.max : item.min;
+                return [0, val];
+            });
+            
             const bgColors = hourlyData.map(item => Math.abs(item.max) >= Math.abs(item.min) ? '#10b981' : '#ef4444');
 
-            renderChart(labels, chartData, bgColors, 'Амплитуда за час');
+            renderChart(labels, chartData, bgColors, 'Макс. амплитуда за час');
         }
 
         async function loadMinutelyChart(hourLabel) {
@@ -232,12 +238,16 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
+                                    // ИСПРАВЛЕНО: Корректные подсказки для каждого уровня графика
                                     if (chartState.level === 'minutely') {
                                         return `Энергия: ${context.raw[1].toLocaleString('ru-RU')}`;
+                                    } else if (chartState.level === 'hourly') {
+                                        return `Макс. амплитуда: ${context.raw[1].toLocaleString('ru-RU')}`;
+                                    } else {
+                                        const min = context.raw[0].toLocaleString('ru-RU');
+                                        const max = context.raw[1].toLocaleString('ru-RU');
+                                        return `Мин: ${min} | Макс: ${max}`;
                                     }
-                                    const min = context.raw[0].toLocaleString('ru-RU');
-                                    const max = context.raw[1].toLocaleString('ru-RU');
-                                    return `Мин: ${min} | Макс: ${max}`;
                                 }
                             }
                         }
