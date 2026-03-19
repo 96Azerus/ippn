@@ -43,7 +43,10 @@
         <!-- График -->
         <div class="panel" style="flex: 2;">
             <h2>Динамика (± 15 дней)</h2>
-            <canvas id="chart" height="250"></canvas>
+            <!-- ИСПРАВЛЕНИЕ ДЛЯ СМАРТФОНОВ: Жесткий контейнер для Chart.js -->
+            <div style="position: relative; height: 250px; width: 100%;">
+                <canvas id="chart"></canvas>
+            </div>
         </div>
 
         <!-- Поиск аномалий -->
@@ -67,6 +70,12 @@
     <script>
         let chartObj = null;
 
+        // ИСПРАВЛЕНИЕ ДЛЯ LOCALTUNNEL: Универсальные заголовки (Render.com их просто проигнорирует)
+        const apiHeaders = {
+            "Bypass-Tunnel-Reminder": "true",
+            "ngrok-skip-browser-warning": "true"
+        };
+
         window.addEventListener('DOMContentLoaded', () => {
             const now = new Date();
             now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -83,7 +92,7 @@
 
             try {
                 // 1. Запрос точной энергии
-                const res = await fetch(`/api/energy?utc_timestamp=${encodeURIComponent(utcIsoString)}`);
+                const res = await fetch(`/api/energy?utc_timestamp=${encodeURIComponent(utcIsoString)}`, { headers: apiHeaders });
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
                     throw new Error(errData.detail || "Ошибка сервера");
@@ -97,7 +106,7 @@
 
                 // 2. Пакетный запрос для графика
                 const baseDateStr = utcIsoString.split('T')[0];
-                const batchRes = await fetch(`/api/energy_batch?base_date=${baseDateStr}&days_range=15`);
+                const batchRes = await fetch(`/api/energy_batch?base_date=${baseDateStr}&days_range=15`, { headers: apiHeaders });
                 if (!batchRes.ok) throw new Error("Ошибка загрузки графика");
                 const batchData = await batchRes.json();
 
@@ -124,7 +133,7 @@
                     chartObj.data.labels = labels;
                     chartObj.data.datasets[0].data = chartData;
                     chartObj.data.datasets[0].backgroundColor = bgColors;
-                    chartObj.update(); // Плавное обновление без мерцания
+                    chartObj.update();
                 }
             } catch (err) {
                 document.getElementById('utcDisplay').innerText = err.message;
@@ -146,7 +155,7 @@
             const thresh = document.getElementById('threshold').value;
 
             try {
-                const res = await fetch(`/api/history?start_year=${start}&end_year=${end}&condition=${cond}&threshold=${thresh}`);
+                const res = await fetch(`/api/history?start_year=${start}&end_year=${end}&condition=${cond}&threshold=${thresh}`, { headers: apiHeaders });
                 
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
@@ -177,7 +186,6 @@
                         <span class="${color}" style="font-size: 1.6rem; font-weight: bold;">${sign}${Math.round(item.score).toLocaleString('ru-RU')}</span>
                     `;
                     
-                    // Клик по результату переносит время пика в основной калькулятор
                     div.onclick = () => {
                         const isoLocal = new Date(item.peak_utc.replace(' UTC', 'Z').replace(' ', 'T'));
                         isoLocal.setMinutes(isoLocal.getMinutes() - isoLocal.getTimezoneOffset());
@@ -190,7 +198,7 @@
                 });
             } catch (err) {
                 loadingEl.innerText = err.message;
-                loadingEl.style.color = '#ef4444'; // Красный цвет для ошибки
+                loadingEl.style.color = '#ef4444';
             }
         }
     </script>
