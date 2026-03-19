@@ -43,7 +43,7 @@
         <!-- График -->
         <div class="panel" style="flex: 2;">
             <h2>Динамика (± 15 дней)</h2>
-            <!-- ИСПРАВЛЕНИЕ ДЛЯ СМАРТФОНОВ: Жесткий контейнер для Chart.js -->
+            <!-- Жесткий контейнер для Chart.js (защита от вылетов на смартфонах) -->
             <div style="position: relative; height: 250px; width: 100%;">
                 <canvas id="chart"></canvas>
             </div>
@@ -70,7 +70,7 @@
     <script>
         let chartObj = null;
 
-        // ИСПРАВЛЕНИЕ ДЛЯ LOCALTUNNEL: Универсальные заголовки (Render.com их просто проигнорирует)
+        // Универсальные заголовки для обхода Localtunnel (Render.com их проигнорирует)
         const apiHeaders = {
             "Bypass-Tunnel-Reminder": "true",
             "ngrok-skip-browser-warning": "true"
@@ -104,30 +104,49 @@
                 scoreEl.innerText = (data.score > 0 ? '+' : '') + Math.round(data.score).toLocaleString('ru-RU');
                 scoreEl.className = 'score ' + (data.score >= 0 ? 'pos' : 'neg');
 
-                // 2. Пакетный запрос для графика
+                // 2. Пакетный запрос для графика (Минутный скан амплитуды)
                 const baseDateStr = utcIsoString.split('T')[0];
                 const batchRes = await fetch(`/api/energy_batch?base_date=${baseDateStr}&days_range=15`, { headers: apiHeaders });
                 if (!batchRes.ok) throw new Error("Ошибка загрузки графика");
                 const batchData = await batchRes.json();
 
                 const labels = batchData.map(item => item.date);
-                const chartData = batchData.map(item => item.score);
-                const bgColors = chartData.map(v => v >= 0 ? '#10b981' : '#ef4444');
+                // Формат данных для плавающего графика (свечи): [min, max]
+                const chartData = batchData.map(item => [item.min, item.max]);
+                
+                // Цвет зависит от того, что сильнее в этот день: позитив или негатив
+                const bgColors = batchData.map(item => Math.abs(item.max) >= Math.abs(item.min) ? '#10b981' : '#ef4444');
 
                 const ctx = document.getElementById('chart').getContext('2d');
+                
                 if (!chartObj) {
                     chartObj = new Chart(ctx, {
                         type: 'bar',
                         data: {
                             labels: labels,
                             datasets:[{
-                                label: 'Пси-энергия',
+                                label: 'Амплитуда энергии за день',
                                 data: chartData,
                                 backgroundColor: bgColors,
-                                borderRadius: 4
+                                borderRadius: 4,
+                                borderSkipped: false
                             }]
                         },
-                        options: { responsive: true, maintainAspectRatio: false }
+                        options: { 
+                            responsive: true, 
+                            maintainAspectRatio: false,
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const min = context.raw[0].toLocaleString('ru-RU');
+                                            const max = context.raw[1].toLocaleString('ru-RU');
+                                            return `Мин: ${min} | Макс: ${max}`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     });
                 } else {
                     chartObj.data.labels = labels;
