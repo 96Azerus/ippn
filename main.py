@@ -15,28 +15,21 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Подключение точных файлов эфемерид (скачанных в Docker или Colab)
+# Подключение точных файлов эфемерид
 swe.set_ephe_path(os.getenv("SWISSEPH_PATH", "/app/ephe"))
 
-# Планеты (Плутон исключен согласно стр. 151 методички ИППН)
+# Планеты (Плутон исключен)
 SUN, MOON, MERCURY, VENUS, MARS, JUPITER, SATURN, URANUS, NEPTUNE = 0, 1, 2, 3, 4, 5, 6, 7, 8
 PLANETS = [SUN, MOON, MERCURY, VENUS, MARS, JUPITER, SATURN, URANUS, NEPTUNE]
 FAST_PLANETS = {SUN, MOON, MERCURY, VENUS, MARS}
 
-# ТОЧНЫЕ ОРБИСЫ ИППН (стр. 186 / PDF стр. 38)
+# ТОЧНЫЕ ОРБИСЫ ИППН
 ASPECTS = {
-    0: 5.0,   # Соединение (±5°)
-    30: 1.0,  # Семисекстиль (±1°)
-    45: 1.0,  # Семиквинтиль (±1°)
-    60: 3.0,  # Секстиль (±3°)
-    90: 3.0,  # Квадратура (±3°)
-    120: 3.0, # Тригон (±3°)
-    135: 1.0, # Сесквиквадрат (±1°)
-    150: 1.0, # Квинкункс (±1°)
-    180: 3.0  # Оппозиция (±3°)
+    0: 5.0,   30: 1.0,  45: 1.0,  60: 3.0,  
+    90: 3.0,  120: 3.0, 135: 1.0, 150: 1.0, 180: 3.0
 }
 
-# ПОЛНАЯ ОЦИФРОВКА ТАБЛИЦЫ 1 (стр. 44)
+# ПОЛНАЯ ОЦИФРОВКА ТАБЛИЦЫ 1
 TABLE_1 = {
     (SUN, MERCURY): {0: 21200},
     (SUN, VENUS): {0: 77000},
@@ -46,9 +39,7 @@ TABLE_1 = {
     (SUN, SATURN): {0: 95000, 30: 18, 45: -18, 60: 308, 90: -308, 120: 308, 135: -18, 150: -18, 180: -95000},
     (SUN, URANUS): {0: 17000, 30: 11, 45: -11, 60: 130, 90: -130, 120: 130, 135: -11, 150: -11, 180: -17000},
     (SUN, NEPTUNE): {0: 12000, 30: 10, 45: -10, 60: 110, 90: -110, 120: 110, 135: -10, 150: -10, 180: -12000},
-    
     (MERCURY, VENUS): {0: 33, 30: 2, 45: -2, 60: 6},
-    
     (MOON, MERCURY): {0: 1643, 30: 6, 45: -6, 60: 41, 90: -41, 120: 41, 135: -6, 150: -6, 180: -1643},
     (MERCURY, MARS): {0: 9, 30: 2, 45: -2, 60: 3, 90: -3, 120: 3, 135: -2, 150: -2, 180: -9},
     (MERCURY, JUPITER): {0: 127, 30: 3, 45: -3, 60: 12, 90: -12, 120: 12, 135: -3, 150: -3, 180: -127},
@@ -78,7 +69,6 @@ TABLE_1 = {
     (URANUS, NEPTUNE): {0: 4, 30: 1, 45: -1, 60: 2, 90: -2, 120: 2, 135: -1, 150: -1, 180: -4}
 }
 
-# Оптимизированное кэширование: медленные планеты кэшируем по дням, быстрые - по минутам
 @lru_cache(maxsize=16384)
 def _pos_slow(planet: int, jd_day: int) -> float:
     pos, _ = swe.calc_ut(float(jd_day), planet)
@@ -116,10 +106,9 @@ def get_energy_for_jd(jd: float) -> int:
                 if aspect in TABLE_1[pair]:
                     deviation = abs(diff - aspect)
                     if deviation <= orb:
-                        # ИНТЕРПОЛЯЦИЯ (согласно стр. 186 методички ИППН)
                         power = 1.0 - (deviation / orb)
                         total_energy += TABLE_1[pair][aspect] * power
-                        break # Планеты не могут быть в двух аспектах одновременно
+                        break
     return round(total_energy)
 
 def format_jd_to_utc(jd: float) -> str:
@@ -142,12 +131,12 @@ def get_energy(utc_timestamp: str):
 def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
     try:
         y, m, d = map(int, base_date.split("-"))
-        datetime.date(y, m, d)  # Валидация существования даты
+        datetime.date(y, m, d)
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Неверный формат даты. Ожидается YYYY-MM-DD")
         
     base_jd = swe.julday(y, m, d, 0.0)
-    step_minute = 1.0 / 1440.0 # Шаг в 1 минуту
+    step_minute = 1.0 / 1440.0
     
     results = []
     for i in range(-days_range, days_range + 1):
@@ -156,7 +145,6 @@ def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
         min_score = float('inf')
         max_score = float('-inf')
         
-        # Сканируем 1440 минут в сутках (формируем "свечу" дня)
         current_jd = day_start_jd
         for _ in range(1440):
             score = get_energy_for_jd(current_jd)
@@ -166,10 +154,62 @@ def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
             
         ry, rm, rd, _ = swe.revjul(day_start_jd)
         results.append({
-            "date": f"{rd:02d}.{rm:02d}", 
+            "date": f"{int(rd):02d}.{int(rm):02d}", 
+            "full_date": f"{int(ry)}-{int(rm):02d}-{int(rd):02d}",
             "min": min_score, 
             "max": max_score
         })
+        
+    return results
+
+@app.get("/api/energy_hourly")
+def get_energy_hourly(date: str):
+    try:
+        y, m, d = map(int, date.split("-"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Формат YYYY-MM-DD")
+        
+    base_jd = swe.julday(y, m, d, 0.0)
+    step_minute = 1.0 / 1440.0
+    
+    results = []
+    for hour in range(24):
+        min_score = float('inf')
+        max_score = float('-inf')
+        
+        current_jd = base_jd + (hour / 24.0)
+        for _ in range(60):
+            score = get_energy_for_jd(current_jd)
+            if score < min_score: min_score = score
+            if score > max_score: max_score = score
+            current_jd += step_minute
+            
+        results.append({
+            "label": f"{hour:02d}:00",
+            "min": min_score,
+            "max": max_score
+        })
+    return results
+
+@app.get("/api/energy_minutely")
+def get_energy_minutely(date: str, hour: int = Query(..., ge=0, le=23)):
+    try:
+        y, m, d = map(int, date.split("-"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Формат YYYY-MM-DD")
+        
+    base_jd = swe.julday(y, m, d, hour / 24.0)
+    step_minute = 1.0 / 1440.0
+    
+    results = []
+    current_jd = base_jd
+    for minute in range(60):
+        score = get_energy_for_jd(current_jd)
+        results.append({
+            "label": f"{hour:02d}:{minute:02d}",
+            "score": score
+        })
+        current_jd += step_minute
         
     return results
 
@@ -183,14 +223,14 @@ def search_history(
     if start_year > end_year:
         raise HTTPException(status_code=400, detail="Год начала не может быть больше года конца")
     if end_year - start_year > 50:
-        raise HTTPException(status_code=400, detail="Максимальный диапазон поиска: 50 лет (защита от перегрузки)")
+        raise HTTPException(status_code=400, detail="Максимальный диапазон поиска: 50 лет")
 
     results = []
     jd_start = swe.julday(start_year, 1, 1, 0.0)
     jd_end = swe.julday(end_year, 12, 31, 0.0)
     
-    step_coarse = 15.0 / 1440.0 # Шаг 15 минут для быстрого сканирования
-    step_fine = 1.0 / 1440.0    # Шаг 1 минута для точного поиска границ
+    step_coarse = 15.0 / 1440.0
+    step_fine = 1.0 / 1440.0
     
     current_jd = jd_start
     in_window = False
@@ -250,7 +290,6 @@ def search_history(
     results.sort(key=lambda x: abs(x["score"]), reverse=True)
     return {"results": results[:50]}
 
-# Кэшируем HTML в памяти при старте
 with open("index.html", "r", encoding="utf-8") as f:
     _HTML_CONTENT = f.read()
 
