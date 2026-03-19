@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# Подключение точных файлов эфемерид (скачанных в Docker)
+# Подключение точных файлов эфемерид (скачанных в Docker или Colab)
 swe.set_ephe_path(os.getenv("SWISSEPH_PATH", "/app/ephe"))
 
 # Планеты (Плутон исключен согласно стр. 151 методички ИППН)
@@ -146,14 +146,30 @@ def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Неверный формат даты. Ожидается YYYY-MM-DD")
         
-    base_jd = swe.julday(y, m, d, 12.0)
+    base_jd = swe.julday(y, m, d, 0.0)
+    step_minute = 1.0 / 1440.0 # Шаг в 1 минуту
     
     results = []
     for i in range(-days_range, days_range + 1):
-        jd = base_jd + i
-        score = get_energy_for_jd(jd)
-        ry, rm, rd, _ = swe.revjul(jd)
-        results.append({"date": f"{rd:02d}.{rm:02d}", "score": score})
+        day_start_jd = base_jd + i
+        
+        min_score = float('inf')
+        max_score = float('-inf')
+        
+        # Сканируем 1440 минут в сутках (формируем "свечу" дня)
+        current_jd = day_start_jd
+        for _ in range(1440):
+            score = get_energy_for_jd(current_jd)
+            if score < min_score: min_score = score
+            if score > max_score: max_score = score
+            current_jd += step_minute
+            
+        ry, rm, rd, _ = swe.revjul(day_start_jd)
+        results.append({
+            "date": f"{rd:02d}.{rm:02d}", 
+            "min": min_score, 
+            "max": max_score
+        })
         
     return results
 
