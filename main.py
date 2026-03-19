@@ -111,10 +111,15 @@ def get_energy_for_jd(jd: float) -> int:
                         break
     return round(total_energy)
 
-def format_jd_to_utc(jd: float) -> str:
-    y, m, d, h = swe.revjul(jd)
-    minute = int((h - int(h)) * 60)
-    return f"{y}-{m:02d}-{d:02d} {int(h):02d}:{minute:02d} UTC"
+def format_jd_to_local(jd: float, offset: float) -> str:
+    """Конвертирует JD (UTC) в строку местного времени с учетом сдвига"""
+    y, m, d, h = swe.revjul(jd + (offset / 24.0))
+    hour = int(h)
+    minute = int(round((h - hour) * 60))
+    if minute >= 60:
+        minute = 0
+        hour += 1
+    return f"{y}-{m:02d}-{d:02d} {hour:02d}:{minute:02d}"
 
 @app.get("/api/energy")
 def get_energy(utc_timestamp: str):
@@ -128,19 +133,21 @@ def get_energy(utc_timestamp: str):
     return {"utc_time": dt.strftime("%Y-%m-%d %H:%M UTC"), "score": score}
 
 @app.get("/api/energy_batch")
-def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
+def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30), offset: float = 0.0):
     try:
         y, m, d = map(int, base_date.split("-"))
-        datetime.date(y, m, d)
+        base_dt = datetime.date(y, m, d)
     except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail="Неверный формат даты. Ожидается YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="Неверный формат даты")
         
-    base_jd = swe.julday(y, m, d, 0.0)
+    # Вычисляем JD для местной полуночи (сдвигаем UTC назад на offset)
+    base_jd = swe.julday(y, m, d, 0.0) - (offset / 24.0)
     step_minute = 1.0 / 1440.0
     
     results = []
     for i in range(-days_range, days_range + 1):
         day_start_jd = base_jd + i
+        current_date = base_dt + datetime.timedelta(days=i)
         
         min_score = float('inf')
         max_score = float('-inf')
@@ -152,10 +159,9 @@ def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
             if score > max_score: max_score = score
             current_jd += step_minute
             
-        ry, rm, rd, _ = swe.revjul(day_start_jd)
         results.append({
-            "date": f"{int(rd):02d}.{int(rm):02d}", 
-            "full_date": f"{int(ry)}-{int(rm):02d}-{int(rd):02d}",
+            "date": current_date.strftime("%d.%m"), 
+            "full_date": current_date.strftime("%Y-%m-%d"),
             "min": min_score, 
             "max": max_score
         })
@@ -163,13 +169,14 @@ def get_energy_batch(base_date: str, days_range: int = Query(15, ge=1, le=30)):
     return results
 
 @app.get("/api/energy_hourly")
-def get_energy_hourly(date: str):
+def get_energy_hourly(date: str, offset: float = 0.0):
     try:
         y, m, d = map(int, date.split("-"))
     except ValueError:
         raise HTTPException(status_code=400, detail="Формат YYYY-MM-DD")
         
-    base_jd = swe.julday(y, m, d, 0.0)
+    # JD для местной полуночи
+    base_jd = swe.julday(y, m, d, 0.0) - (offset / 24.0)
     step_minute = 1.0 / 1440.0
     
     results = []
@@ -192,14 +199,14 @@ def get_energy_hourly(date: str):
     return results
 
 @app.get("/api/energy_minutely")
-def get_energy_minutely(date: str, hour: int = Query(..., ge=0, le=23)):
+def get_energy_minutely(date: str, hour: int = Query(..., ge=0, le=23), offset: float = 0.0):
     try:
         y, m, d = map(int, date.split("-"))
     except ValueError:
         raise HTTPException(status_code=400, detail="Формат YYYY-MM-DD")
         
-    # ИСПРАВЛЕНО: Передаем час как float(hour), а не как долю дня
-    base_jd = swe.julday(y, m, d, float(hour))
+    # JD для начала местного часа
+    base_jd = swe.julday(y, m, d, float(hour)) - (offset / 24.0)
     step_minute = 1.0 / 1440.0
     
     results = []
@@ -219,7 +226,8 @@ def search_history(
     start_year: int = Query(..., ge=1800, le=2300),
     end_year: int = Query(..., ge=1800, le=2300),
     threshold: int = Query(...),
-    condition: Literal["greater", "less"] = Query(...)
+    condition: Literal["greater", "less"] = Query(...),
+    offset: float = 0.0
 ):
     if start_year > end_year:
         raise HTTPException(status_code=400, detail="Год начала не может быть больше года конца")
@@ -275,10 +283,11 @@ def search_history(
                         break
                 window_end_jd = fine_jd
                 
+                # Возвращаем время сразу в местном часовом поясе
                 results.append({
-                    "start_utc": format_jd_to_utc(window_start_jd),
-                    "peak_utc": format_jd_to_utc(window_peak_jd),
-                    "end_utc": format_jd_to_utc(window_end_jd),
+                    "start_local": format_jd_to_local(window_start_jd, offset),
+                    "peak_local": format_jd_to_local(window_peak_jd, offset),
+                    "end_local": format_jd_to_local(window_end_jd, offset),
                     "score": window_max_score
                 })
                 in_window = False
