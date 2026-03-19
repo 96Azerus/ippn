@@ -27,7 +27,6 @@
         @media (min-width: 600px) { .search-controls > * { min-width: 150px; } }
         .peak-badge { background: #3b82f6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; margin-left: 8px; }
         
-        /* Стили для шапки графика */
         .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; flex-wrap: wrap; gap: 10px;}
         .chart-title-container { display: flex; flex-direction: column; }
         .chart-title { margin: 0; font-size: 1.2rem; }
@@ -41,10 +40,40 @@
         <!-- Текущий расчет -->
         <div class="panel">
             <h2 style="margin-top: 0; font-size: 1.2rem;">Расчет на точное время</h2>
-            <label style="font-size: 0.9rem; color: #94a3b8;">Ваше местное время:</label>
+            
+            <label style="font-size: 0.9rem; color: #94a3b8;">Часовой пояс для графиков и поиска:</label>
+            <select id="timezone" onchange="calcEnergy()">
+                <option value="-11">-11 (Самоа)</option>
+                <option value="-10">-10 (Гавайи)</option>
+                <option value="-9">-9 (Аляска)</option>
+                <option value="-8">-8 (Лос-Анджелес)</option>
+                <option value="-7">-7 (Денвер)</option>
+                <option value="-6">-6 (Мехико)</option>
+                <option value="-5">-5 (Нью-Йорк, Гавана)</option>
+                <option value="-4">-4 (Каракас)</option>
+                <option value="-3">-3 (Буэнос-Айрес)</option>
+                <option value="-2">-2 (Среднеатлантическое)</option>
+                <option value="-1">-1 (Азорские острова)</option>
+                <option value="0">0 (Лондон, Лиссабон, UTC)</option>
+                <option value="1">+1 (Берлин, Париж, Рим)</option>
+                <option value="2">+2 (Калининград, Киев, Каир)</option>
+                <option value="3">+3 (Москва, Стамбул, Минск)</option>
+                <option value="4">+4 (Самара, Баку, Тбилиси)</option>
+                <option value="5">+5 (Екатеринбург, Ташкент)</option>
+                <option value="5.5">+5.5 (Индия, Шри-Ланка)</option>
+                <option value="6">+6 (Омск, Алматы)</option>
+                <option value="7">+7 (Красноярск, Бангкок)</option>
+                <option value="8">+8 (Иркутск, Пекин)</option>
+                <option value="9">+9 (Якутск, Токио)</option>
+                <option value="10">+10 (Владивосток, Сидней)</option>
+                <option value="11">+11 (Магадан)</option>
+                <option value="12">+12 (Камчатка, Окленд)</option>
+            </select>
+
+            <label style="font-size: 0.9rem; color: #94a3b8; display: block; margin-top: 10px;">Местное время (в выбранном поясе):</label>
             <input type="datetime-local" id="dateTimePicker" step="60">
             <button onclick="calcEnergy()">Рассчитать</button>
-            <div id="utcDisplay" class="utc-info">Конвертация в UTC...</div>
+            <div id="utcDisplay" class="utc-info">Конвертация...</div>
             <div id="scoreDisplay" class="score pos">0</div>
         </div>
 
@@ -64,7 +93,7 @@
 
         <!-- Поиск аномалий -->
         <div class="panel" style="flex: 100%;">
-            <h2 style="margin-top: 0; font-size: 1.2rem;">Снайперский поиск</h2>
+            <h2 style="margin-top: 0; font-size: 1.2rem;">Снайперский поиск (в местном времени)</h2>
             <div class="search-controls">
                 <input type="number" id="startYear" placeholder="Год от" value="2020">
                 <input type="number" id="endYear" placeholder="Год до" value="2030">
@@ -83,9 +112,8 @@
     <script>
         let chartObj = null;
         
-        // Состояния для навигации по графику
         let chartState = {
-            level: 'daily', // 'daily', 'hourly', 'minutely'
+            level: 'daily',
             baseDateStr: '',
             selectedFullDate: '',
             selectedHour: 0,
@@ -97,19 +125,37 @@
             "ngrok-skip-browser-warning": "true"
         };
 
+        // Автоопределение часового пояса при загрузке
         window.addEventListener('DOMContentLoaded', () => {
+            const tzOffsetHours = -(new Date().getTimezoneOffset() / 60);
+            const tzSelect = document.getElementById('timezone');
+            for(let opt of tzSelect.options) {
+                if (parseFloat(opt.value) === tzOffsetHours) {
+                    opt.selected = true;
+                    break;
+                }
+            }
+
             const now = new Date();
             now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
             document.getElementById('dateTimePicker').value = now.toISOString().slice(0,16);
             calcEnergy();
         });
 
+        function getSelectedOffset() {
+            return parseFloat(document.getElementById('timezone').value);
+        }
+
         async function calcEnergy() {
             const localTimeStr = document.getElementById('dateTimePicker').value;
             if (!localTimeStr) return;
 
-            const localDate = new Date(localTimeStr);
-            const utcIsoString = localDate.toISOString(); 
+            const offset = getSelectedOffset();
+            
+            // Переводим введенное местное время в UTC для точного расчета
+            let d = new Date(localTimeStr + "Z"); 
+            d.setMinutes(d.getMinutes() - offset * 60);
+            const utcIsoString = d.toISOString(); 
 
             try {
                 const res = await fetch(`/api/energy?utc_timestamp=${encodeURIComponent(utcIsoString)}`, { headers: apiHeaders });
@@ -121,7 +167,7 @@
                 scoreEl.innerText = (data.score > 0 ? '+' : '') + Math.round(data.score).toLocaleString('ru-RU');
                 scoreEl.className = 'score ' + (data.score >= 0 ? 'pos' : 'neg');
 
-                chartState.baseDateStr = utcIsoString.split('T')[0];
+                chartState.baseDateStr = localTimeStr.split('T')[0];
                 await loadDailyChart();
 
             } catch (err) {
@@ -129,15 +175,14 @@
             }
         }
 
-        // --- ФУНКЦИИ ЗАГРУЗКИ УРОВНЕЙ ГРАФИКА ---
-
         async function loadDailyChart() {
             chartState.level = 'daily';
             document.getElementById('chartTitle').innerText = 'Динамика (± 15 дней)';
             document.getElementById('chartHint').innerText = 'Нажмите на столбец для просмотра по часам';
             document.getElementById('btnBackChart').style.display = 'none';
 
-            const res = await fetch(`/api/energy_batch?base_date=${chartState.baseDateStr}&days_range=15`, { headers: apiHeaders });
+            const offset = getSelectedOffset();
+            const res = await fetch(`/api/energy_batch?base_date=${chartState.baseDateStr}&days_range=15&offset=${offset}`, { headers: apiHeaders });
             const batchData = await res.json();
             chartState.dailyDataCache = batchData;
 
@@ -155,17 +200,15 @@
             document.getElementById('chartHint').innerText = 'Нажмите на столбец для просмотра по минутам';
             document.getElementById('btnBackChart').style.display = 'block';
 
-            const res = await fetch(`/api/energy_hourly?date=${fullDate}`, { headers: apiHeaders });
+            const offset = getSelectedOffset();
+            const res = await fetch(`/api/energy_hourly?date=${fullDate}&offset=${offset}`, { headers: apiHeaders });
             const hourlyData = await res.json();
 
             const labels = hourlyData.map(item => item.label);
-            
-            // ИСПРАВЛЕНО: Делаем столбцы сплошными от 0 до максимального по модулю значения за час
             const chartData = hourlyData.map(item => {
                 const val = Math.abs(item.max) >= Math.abs(item.min) ? item.max : item.min;
                 return [0, val];
             });
-            
             const bgColors = hourlyData.map(item => Math.abs(item.max) >= Math.abs(item.min) ? '#10b981' : '#ef4444');
 
             renderChart(labels, chartData, bgColors, 'Макс. амплитуда за час');
@@ -174,10 +217,11 @@
         async function loadMinutelyChart(hourLabel) {
             chartState.level = 'minutely';
             const hourInt = parseInt(hourLabel.split(':')[0]);
-            document.getElementById('chartTitle').innerText = `Минуты (${hourLabel} UTC)`;
+            document.getElementById('chartTitle').innerText = `Минуты (${hourLabel})`;
             document.getElementById('chartHint').innerText = 'Показана каждая минута выбранного часа';
             
-            const res = await fetch(`/api/energy_minutely?date=${chartState.selectedFullDate}&hour=${hourInt}`, { headers: apiHeaders });
+            const offset = getSelectedOffset();
+            const res = await fetch(`/api/energy_minutely?date=${chartState.selectedFullDate}&hour=${hourInt}&offset=${offset}`, { headers: apiHeaders });
             const minutelyData = await res.json();
 
             const labels = minutelyData.map(item => item.label);
@@ -196,12 +240,10 @@
             }
         }
 
-        // --- ОТРИСОВКА И КЛИКИ ---
-
         function renderChart(labels, data, bgColors, datasetLabel) {
             const ctx = document.getElementById('chart').getContext('2d');
             
-            if (chartObj) chartObj.destroy(); // Очистка памяти GPU телефона
+            if (chartObj) chartObj.destroy();
 
             chartObj = new Chart(ctx, {
                 type: 'bar',
@@ -219,7 +261,7 @@
                     responsive: true, 
                     maintainAspectRatio: false,
                     interaction: {
-                        mode: 'index', // Идеально для тачскрина: срабатывает по всей вертикали
+                        mode: 'index',
                         intersect: false,
                     },
                     onClick: (e, elements) => {
@@ -238,7 +280,6 @@
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    // ИСПРАВЛЕНО: Корректные подсказки для каждого уровня графика
                                     if (chartState.level === 'minutely') {
                                         return `Энергия: ${context.raw[1].toLocaleString('ru-RU')}`;
                                     } else if (chartState.level === 'hourly') {
@@ -277,9 +318,10 @@
             const end = document.getElementById('endYear').value;
             const cond = document.getElementById('condition').value;
             const thresh = document.getElementById('threshold').value;
+            const offset = getSelectedOffset();
 
             try {
-                const res = await fetch(`/api/history?start_year=${start}&end_year=${end}&condition=${cond}&threshold=${thresh}`, { headers: apiHeaders });
+                const res = await fetch(`/api/history?start_year=${start}&end_year=${end}&condition=${cond}&threshold=${thresh}&offset=${offset}`, { headers: apiHeaders });
                 
                 if (!res.ok) {
                     const errData = await res.json().catch(() => ({}));
@@ -302,18 +344,16 @@
                     
                     div.innerHTML = `
                         <div style="display: flex; flex-direction: column; gap: 4px;">
-                            <span style="font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Окно активности:</span>
-                            <span style="font-size: 0.9rem; color: #cbd5e1;">Начало: ${item.start_utc}</span>
-                            <span style="font-size: 1rem; font-weight: bold; color: #e2e8f0;">ПИК: ${item.peak_utc} <span class="peak-badge">MAX</span></span>
-                            <span style="font-size: 0.9rem; color: #cbd5e1;">Конец: ${item.end_utc}</span>
+                            <span style="font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px;">Окно активности (Местное время):</span>
+                            <span style="font-size: 0.9rem; color: #cbd5e1;">Начало: ${item.start_local}</span>
+                            <span style="font-size: 1rem; font-weight: bold; color: #e2e8f0;">ПИК: ${item.peak_local} <span class="peak-badge">MAX</span></span>
+                            <span style="font-size: 0.9rem; color: #cbd5e1;">Конец: ${item.end_local}</span>
                         </div>
                         <span class="${color}" style="font-size: 1.4rem; font-weight: bold;">${sign}${Math.round(item.score).toLocaleString('ru-RU')}</span>
                     `;
                     
                     div.onclick = () => {
-                        const isoLocal = new Date(item.peak_utc.replace(' UTC', 'Z').replace(' ', 'T'));
-                        isoLocal.setMinutes(isoLocal.getMinutes() - isoLocal.getTimezoneOffset());
-                        document.getElementById('dateTimePicker').value = isoLocal.toISOString().slice(0,16);
+                        document.getElementById('dateTimePicker').value = item.peak_local.replace(' ', 'T');
                         calcEnergy();
                         window.scrollTo({ top: 0, behavior: 'smooth' });
                     };
