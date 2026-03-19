@@ -198,7 +198,8 @@ def get_energy_minutely(date: str, hour: int = Query(..., ge=0, le=23)):
     except ValueError:
         raise HTTPException(status_code=400, detail="Формат YYYY-MM-DD")
         
-    base_jd = swe.julday(y, m, d, hour / 24.0)
+    # ИСПРАВЛЕНО: Передаем час как float(hour), а не как долю дня
+    base_jd = swe.julday(y, m, d, float(hour))
     step_minute = 1.0 / 1440.0
     
     results = []
